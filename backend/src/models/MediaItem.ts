@@ -13,6 +13,7 @@ export interface IMediaItem extends Document {
     duration?: number;
     size?: number;
     cid?: string;
+    isFavorite?: boolean;
 }
 
 const MediaItemSchema: Schema = new Schema({
@@ -28,6 +29,7 @@ const MediaItemSchema: Schema = new Schema({
     duration: { type: Number },
     size: { type: Number },
     cid: { type: String, index: true },
+    isFavorite: { type: Boolean, default: false },
 }, {
     timestamps: true
 });

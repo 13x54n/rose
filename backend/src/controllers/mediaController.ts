@@ -118,6 +118,31 @@ export const deleteMediaItem = async (req: Request, res: Response): Promise<void
         console.error('[MediaRegistry] Delete error:', error.message);
         res.status(500).json({ error: 'Internal server error', details: error.message });
     }
+
+};
+
+export const toggleFavorite = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { installationId, localId } = req.params;
+
+        const item = await MediaItem.findOne({ installationId, localId });
+        if (!item) {
+            res.status(404).json({ error: 'Media item not found' });
+            return;
+        }
+
+        item.isFavorite = !item.isFavorite;
+        await item.save();
+
+        res.status(200).json({
+            message: 'Favorite status updated',
+            isFavorite: item.isFavorite,
+            localId
+        });
+    } catch (error: any) {
+        console.error('[MediaRegistry] Toggle Favorite error:', error.message);
+        res.status(500).json({ error: 'Internal server error', details: error.message });
+    }
 };
 
 /**

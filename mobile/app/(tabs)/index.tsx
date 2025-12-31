@@ -27,6 +27,8 @@ export default function FileBrowser() {
     const [dateRange, setDateRange] = useState('Oct 9, 2024 - Today');
     const [selectionMode, setSelectionMode] = useState(false);
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+    const [isDeleting, setIsDeleting] = useState(false);
+    const [deleteProgress, setDeleteProgress] = useState({ current: 0, total: 0 });
 
     // Fixed view mode for "Photos" tab
     const viewMode = 'grid';
@@ -70,7 +72,7 @@ export default function FileBrowser() {
     const loadFiles = async (showLoading = true) => {
         if (showLoading) setLoading(true);
         try {
-            const data = await FileService.getAllPhotos();
+            const data = await FileService.getAllMedia();
             setFiles(data);
         } catch (e) {
             console.error(e);
@@ -101,7 +103,7 @@ export default function FileBrowser() {
         }
 
         const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ['images'],
+            mediaTypes: ['images', 'videos'],
             allowsEditing: false,
             quality: 1,
         });
@@ -180,12 +182,26 @@ export default function FileBrowser() {
                     text: "Delete",
                     style: "destructive",
                     onPress: async () => {
-                        for (const id of selectedIds) {
-                            await FileService.deleteFile(id);
+                        setIsDeleting(true);
+                        setDeleteProgress({ current: 0, total: count });
+
+                        try {
+                            let deletedCount = 0;
+                            for (const id of selectedIds) {
+                                await FileService.deleteFile(id);
+                                deletedCount++;
+                                setDeleteProgress(prev => ({ ...prev, current: deletedCount }));
+                            }
+                            // Small delay to show completion
+                            setTimeout(() => {
+                                setIsDeleting(false);
+                                cancelSelection();
+                                loadFiles(false);
+                            }, 500);
+                        } catch (error) {
+                            setIsDeleting(false);
+                            Alert.alert("Error", "Failed to delete some photos.");
                         }
-                        cancelSelection();
-                        loadFiles(false);
-                        Alert.alert("Success", `${count} ${count === 1 ? 'photo' : 'photos'} deleted.`);
                     }
                 }
             ]
@@ -274,6 +290,26 @@ export default function FileBrowser() {
                         <TouchableOpacity style={styles.toolbarIcon} onPress={handleDeleteSelected}>
                             <Trash2 size={22} color="#fff" strokeWidth={2} />
                         </TouchableOpacity>
+                    </View>
+                </View>
+            )}
+
+            {/* Deletion Progress Overlay */}
+            {isDeleting && (
+                <View style={styles.loadingOverlay}>
+                    <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
+                    <View style={styles.progressContainer}>
+                        <ActivityIndicator size="large" color="#fff" style={{ marginBottom: 15 }} />
+                        <Text style={styles.progressText}>Deleting Photos...</Text>
+                        <Text style={styles.progressCount}>{deleteProgress.current} / {deleteProgress.total}</Text>
+                        <View style={styles.progressBarBg}>
+                            <View
+                                style={[
+                                    styles.progressBarFill,
+                                    { width: `${(deleteProgress.current / deleteProgress.total) * 100}%` }
+                                ]}
+                            />
+                        </View>
                     </View>
                 </View>
             )}
@@ -404,5 +440,46 @@ const styles = StyleSheet.create({
         fontSize: 18,
         fontWeight: '600',
         letterSpacing: -0.2,
+    },
+    loadingOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 10000,
+    },
+    progressContainer: {
+        backgroundColor: '#1C1C1E',
+        padding: 24,
+        borderRadius: 16,
+        alignItems: 'center',
+        width: 200,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 10,
+        elevation: 10,
+    },
+    progressText: {
+        color: '#fff',
+        fontSize: 16,
+        fontWeight: '600',
+        marginBottom: 8,
+    },
+    progressCount: {
+        color: Colors.dark.textSecondary,
+        fontSize: 14,
+        marginBottom: 16,
+    },
+    progressBarBg: {
+        width: '100%',
+        height: 6,
+        backgroundColor: '#333',
+        borderRadius: 3,
+        overflow: 'hidden',
+    },
+    progressBarFill: {
+        height: '100%',
+        backgroundColor: '#FF3B30', // Red for delete
+        borderRadius: 3,
     }
 });

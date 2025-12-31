@@ -9,8 +9,6 @@ import { mediaManager } from '../services/mediaManager';
 // Backend URL from environment variables
 const BACKEND_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5000';
 
-// GestureHandlerRootView removed - using plain View
-
 export default function RootLayout() {
   useEffect(() => {
     const initApp = async () => {

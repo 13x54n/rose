@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { healthCheck } from '../controllers/healthController';
 import { syncInstallation } from '../controllers/installationController';
-import { syncMediaRegistry, getMediaRegistry, deleteMediaItem, uploadMedia, viewIpfsMedia } from '../controllers/mediaController';
+import { syncMediaRegistry, getMediaRegistry, deleteMediaItem, uploadMedia, viewIpfsMedia, toggleFavorite } from '../controllers/mediaController';
 import { upload } from '../middleware/upload';
 
 const router = Router();
@@ -17,6 +17,7 @@ apiRouter.post('/installations', syncInstallation);
 apiRouter.post('/media/sync', syncMediaRegistry);
 apiRouter.get('/media/:installationId', getMediaRegistry);
 apiRouter.delete('/media/:installationId/:localId', deleteMediaItem);
+apiRouter.patch('/media/:installationId/:localId/favorite', toggleFavorite);
 apiRouter.post('/media/upload', upload.single('file'), uploadMedia);
 apiRouter.get('/media/view/:cid', viewIpfsMedia);
 

@@ -12,6 +12,9 @@ export interface IPFSFile {
     uri?: string; // For photos/videos
     parentId?: string; // For nested folders
     itemsCount?: number; // For folders
+    creationTime?: string;
+    isFavorite?: boolean;
+    duration?: number; // Duration in seconds
 }
 
 // Backend URL from environment variables
@@ -56,9 +59,12 @@ export const FileService = {
                     name: item.filename,
                     type: item.mediaType === 'video' ? 'video' : 'photo',
                     date: item.creationTime ? new Date(item.creationTime).toISOString().split('T')[0] : 'Unknown',
+                    creationTime: item.creationTime,
+                    isFavorite: item.isFavorite,
                     uri: item.uri,
                     size: item.size ? `${(item.size / 1024 / 1024).toFixed(1)} MB` : 'N/A',
-                    parentId: 'root'
+                    parentId: 'root',
+                    duration: item.duration || 0
                 };
             });
 
@@ -76,8 +82,8 @@ export const FileService = {
     /**
      * Specifically used for the main library grid.
      */
-    getAllPhotos: async (): Promise<IPFSFile[]> => {
-        return FileService.getFiles('root', 'photo');
+    getAllMedia: async (): Promise<IPFSFile[]> => {
+        return FileService.getFiles('root', 'all');
     },
 
     /**
@@ -109,6 +115,38 @@ export const FileService = {
         } catch (error) {
             console.error('[FileService] Error deleting media:', error);
             return false;
+        }
+    },
+
+    /**
+     * Toggles the favorite status of a file.
+     */
+    toggleFavorite: async (localId: string): Promise<{ success: boolean; isFavorite?: boolean }> => {
+        try {
+            const installationId = await idManager.getInstallationId();
+            let finalUrl = BACKEND_URL;
+            if (__DEV__ && finalUrl.includes('localhost')) {
+                const debuggerHost = Constants.expoConfig?.hostUri?.split(':')[0];
+                if (debuggerHost) {
+                    finalUrl = finalUrl.replace('localhost', debuggerHost);
+                }
+            }
+
+            console.log(`[FileService] Toggling favorite: ${localId}`);
+
+            const response = await fetch(`${finalUrl}/api/v1/media/${installationId}/${localId}/favorite`, {
+                method: 'PATCH',
+            });
+
+            if (!response.ok) {
+                throw new Error(`Failed to toggle favorite: ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            return { success: true, isFavorite: data.isFavorite };
+        } catch (error) {
+            console.error('[FileService] Error toggling favorite:', error);
+            return { success: false };
         }
     },
 
@@ -145,6 +183,7 @@ export const FileService = {
                 mediaType: asset.mediaType,
                 uri: simulatedUri,
                 creationTime: asset.creationTime,
+                duration: asset.duration
             };
 
             const response = await fetch(`${finalUrl}/api/v1/media/sync`, {

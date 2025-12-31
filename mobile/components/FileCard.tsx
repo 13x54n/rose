@@ -1,4 +1,5 @@
-import { View, Text, StyleSheet, Image, Pressable } from 'react-native';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { Image } from 'expo-image';
 import { File, Folder, Music, PlayCircle, MoreVertical } from 'lucide-react-native';
 import { IPFSFile } from '../services/FileService';
 import { Colors } from '../constants/Theme';
@@ -15,15 +16,33 @@ interface FileCardProps {
 export default function FileCard({ file, onPress, onLongPress, viewMode, isSelected, selectionMode }: FileCardProps) {
     const isGrid = viewMode === 'grid';
 
+    const formatDuration = (seconds?: number) => {
+        if (!seconds) return '0:00';
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.round(seconds % 60);
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    };
+
     const renderIcon = () => {
-        if (file.type === 'photo') {
+        if (file.type === 'photo' || file.type === 'video') {
             return (
-                <Image source={{ uri: file.uri }} style={isGrid ? styles.gridImage : styles.listImage} />
+                <View style={{ width: '100%', height: '100%' }}>
+                    <Image
+                        source={{ uri: file.uri }}
+                        style={isGrid ? styles.gridImage : styles.listImage}
+                        contentFit="cover"
+                        transition={200}
+                    />
+                    {file.type === 'video' && (
+                        <View style={styles.videoIndicator}>
+                            <PlayCircle size={isGrid ? 20 : 16} color="#fff" fill="rgba(0,0,0,0.3)" />
+                        </View>
+                    )}
+                </View>
             );
         }
         if (file.type === 'folder') return <Folder size={isGrid ? 40 : 24} color={Colors.dark.accent} strokeWidth={1.5} />;
         if (file.type === 'music') return <Music size={isGrid ? 40 : 24} color="#EC4899" strokeWidth={1.5} />;
-        if (file.type === 'video') return <PlayCircle size={isGrid ? 40 : 24} color="#10B981" strokeWidth={1.5} />;
         return <File size={isGrid ? 40 : 24} color={Colors.dark.textSecondary} strokeWidth={1.5} />;
     };
 
@@ -48,7 +67,11 @@ export default function FileCard({ file, onPress, onLongPress, viewMode, isSelec
                     Let's hide text for photos to match "Gallery" look. */}
                 {file.type !== 'photo' && (
                     <View style={styles.gridInfo}>
-                        <Text style={styles.fileName} numberOfLines={1}>{file.name}</Text>
+                        {file.type === 'video' && file.duration ? (
+                            <Text style={styles.durationText}>{formatDuration(file.duration)}</Text>
+                        ) : (
+                            <Text style={styles.fileName} numberOfLines={1}>{file.name}</Text>
+                        )}
                     </View>
                 )}
             </Pressable>
@@ -163,5 +186,22 @@ const styles = StyleSheet.create({
         height: 10,
         borderRadius: 5,
         backgroundColor: '#fff',
+    },
+    durationText: {
+        color: '#fff',
+        fontSize: 12,
+        fontWeight: '600',
+        textShadowColor: 'rgba(0, 0, 0, 0.75)',
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 3,
+        position: 'absolute',
+        bottom: 6,
+        right: 6,
+    },
+    videoIndicator: {
+        position: 'absolute',
+        top: '50%',
+        left: '50%',
+        transform: [{ translateX: -10 }, { translateY: -10 }],
     }
 });

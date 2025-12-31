@@ -1,16 +1,43 @@
-import { View, Text, StyleSheet, Image, Pressable, Dimensions, FlatList, Alert, DeviceEventEmitter } from 'react-native';
+import { View, Text, StyleSheet, Image, Pressable, Dimensions, FlatList, Alert, DeviceEventEmitter, TouchableWithoutFeedback, Share as RNShare } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft, MoreHorizontal, Share, Heart, Info, Sliders, Trash } from 'lucide-react-native';
 import { BlurView } from 'expo-blur';
 import { useState, useEffect, useRef } from 'react';
 import { FileService, IPFSFile } from '../services/FileService';
-import ZoomableImage from '../components/ZoomableImage';
+import { Image as ExpoImage } from 'expo-image';
 
-const { width } = Dimensions.get('window');
+import { Modal, TouchableOpacity, ScrollView } from 'react-native';
+import { useVideoPlayer, VideoView } from 'expo-video';
+
+const { width, height } = Dimensions.get('window');
 const THUMB_SIZE = 40;
 const THUMB_GAP = 4;
 const ITEM_WIDTH = THUMB_SIZE + THUMB_GAP;
+
+const VideoItem = ({ uri, shouldPlay }: { uri: string; shouldPlay: boolean }) => {
+    const player = useVideoPlayer(uri, player => {
+        player.loop = true;
+    });
+
+    useEffect(() => {
+        if (shouldPlay) {
+            player.play();
+        } else {
+            player.pause();
+        }
+    }, [shouldPlay, player]);
+
+    return (
+        <VideoView
+            style={styles.mainImage}
+            player={player}
+            allowsFullscreen
+            allowsPictureInPicture
+            nativeControls={false}
+        />
+    );
+};
 
 export default function PhotoViewer() {
     const router = useRouter();
@@ -22,6 +49,10 @@ export default function PhotoViewer() {
     const [currentIndex, setCurrentIndex] = useState(0);
     const [currentPhoto, setCurrentPhoto] = useState<IPFSFile | null>(null);
     const [scrollEnabled, setScrollEnabled] = useState(true);
+    const [showControls, setShowControls] = useState(true);
+    const [showInfo, setShowInfo] = useState(false);
+
+    // Initial Params
 
     // Initial Params
     const initialId = params.id as string;
@@ -37,27 +68,31 @@ export default function PhotoViewer() {
     const centerPadding = (width - ITEM_WIDTH) / 2;
 
     useEffect(() => {
+        const loadPhotos = async () => {
+            const allMedia = await FileService.getAllMedia();
+            // Optional: filter if we only want to view valid media
+            setPhotos(allMedia);
+
+            // Find current index based on ID
+            if (initialId) {
+                const index = allMedia.findIndex((p: IPFSFile) => p.id === initialId);
+                if (index !== -1) {
+                    setCurrentIndex(index);
+                    setCurrentPhoto(allMedia[index]);
+                    // Needs a slight delay to scroll after layout
+                    setTimeout(() => {
+                        mainListRef.current?.scrollToIndex({ index, animated: false });
+                        scrubberListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+                    }, 100);
+                } else if (allMedia.length > 0) {
+                    setCurrentPhoto(allMedia[0]);
+                }
+            } else if (allMedia.length > 0) {
+                setCurrentPhoto(allMedia[0]);
+            }
+        };
         loadPhotos();
-    }, []);
-
-    const loadPhotos = async () => {
-        const data = await FileService.getAllPhotos();
-        setPhotos(data);
-
-        // Find initial index
-        const index = data.findIndex(p => p.id === initialId);
-        if (index !== -1) {
-            setCurrentIndex(index);
-            setCurrentPhoto(data[index]);
-            // Needs a slight delay to scroll after layout
-            setTimeout(() => {
-                mainListRef.current?.scrollToIndex({ index, animated: false });
-                scrubberListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
-            }, 100);
-        } else if (data.length > 0) {
-            setCurrentPhoto(data[0]);
-        }
-    };
+    }, [initialId]);
 
     const handleBack = () => {
         router.back();
@@ -107,17 +142,80 @@ export default function PhotoViewer() {
         );
     };
 
-    const displayDate = currentPhoto ? currentPhoto.date : initialDate;
+    const toggleControls = () => {
+        setShowControls(prev => !prev);
+    };
+
+    const handleShare = async () => {
+        if (!currentPhoto) return;
+        try {
+            await RNShare.share({
+                url: currentPhoto.uri,
+                title: 'Share Photo',
+                message: 'Check out this photo!',
+            });
+        } catch (error) {
+            console.error(error);
+        }
+    };
+
+    const handleFavorite = async () => {
+        if (!currentPhoto) return;
+        const newStatus = !currentPhoto.isFavorite;
+
+        // Optimistic update
+        setCurrentPhoto(prev => prev ? { ...prev, isFavorite: newStatus } : null);
+        setPhotos(prev => prev.map(p => p.id === currentPhoto.id ? { ...p, isFavorite: newStatus } : p));
+
+        const result = await FileService.toggleFavorite(currentPhoto.id);
+        if (!result.success) {
+            // Revert on failure
+            setCurrentPhoto(prev => prev ? { ...prev, isFavorite: !newStatus } : null);
+            setPhotos(prev => prev.map(p => p.id === currentPhoto.id ? { ...p, isFavorite: !newStatus } : p));
+            Alert.alert("Error", "Failed to update favorite status");
+        } else {
+            DeviceEventEmitter.emit('library-refresh');
+        }
+    };
+
+    const formatDate = (isoString?: string) => {
+        if (!isoString) return { date: 'Unknown Date', time: '' };
+        const date = new Date(isoString);
+        return {
+            date: date.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '.'),
+            time: date.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        };
+    };
+
+    const { date: displayDate, time: displayTime } = formatDate(currentPhoto?.creationTime || new Date().toISOString());
 
     // Render Items
-    const renderMainItem = ({ item }: { item: IPFSFile }) => (
-        <View style={styles.imageWrapper}>
-            <ZoomableImage
-                uri={item.uri || ''}
-                onZoomChange={(isZoomed) => setScrollEnabled(!isZoomed)}
-            />
-        </View>
-    );
+    const renderMainItem = ({ item }: { item: IPFSFile }) => {
+        if (item.type === 'video') {
+            return (
+                <TouchableWithoutFeedback onPress={toggleControls}>
+                    <View style={styles.imageWrapper}>
+                        <VideoItem
+                            uri={item.uri || ''}
+                            shouldPlay={currentIndex === photos.indexOf(item)}
+                        />
+                    </View>
+                </TouchableWithoutFeedback>
+            );
+        }
+
+        return (
+            <TouchableWithoutFeedback onPress={toggleControls}>
+                <View style={styles.imageWrapper}>
+                    <ExpoImage
+                        source={{ uri: item.uri || '' }}
+                        style={styles.mainImage}
+                        contentFit="contain"
+                    />
+                </View>
+            </TouchableWithoutFeedback>
+        );
+    };
 
     const renderThumbnail = ({ item, index }: { item: IPFSFile, index: number }) => {
         const isActive = index === currentIndex;
@@ -134,20 +232,22 @@ export default function PhotoViewer() {
     return (
         <View style={styles.container}>
             {/* Header */}
-            <BlurView intensity={30} tint="dark" style={[styles.header, { paddingTop: insets.top }]}>
-                <View style={styles.headerContent}>
-                    <Pressable onPress={handleBack} style={styles.backButton}>
-                        <ChevronLeft size={28} color="#0A84FF" />
-                    </Pressable>
-                    <View style={styles.headerTitleContainer}>
-                        <Text style={styles.headerDate}>{displayDate}</Text>
-                        <Text style={styles.headerTime}>16:17</Text>
+            {showControls && (
+                <BlurView intensity={30} tint="dark" style={[styles.header, { paddingTop: insets.top }]}>
+                    <View style={styles.headerContent}>
+                        <Pressable onPress={handleBack} style={styles.backButton}>
+                            <ChevronLeft size={32} color="#0A84FF" />
+                        </Pressable>
+                        <View style={styles.headerTitleContainer}>
+                            <Text style={styles.headerDate}>{displayDate}</Text>
+                            <Text style={styles.headerTime}>{displayTime}</Text>
+                        </View>
+                        <Pressable style={styles.menuButton}>
+                            <MoreHorizontal size={24} color="#0A84FF" />
+                        </Pressable>
                     </View>
-                    <Pressable style={styles.menuButton}>
-                        <MoreHorizontal size={24} color="#0A84FF" />
-                    </Pressable>
-                </View>
-            </BlurView>
+                </BlurView>
+            )}
 
             {/* Main Paging List */}
             <FlatList
@@ -168,32 +268,74 @@ export default function PhotoViewer() {
             />
 
             {/* Scrubber */}
-            <View style={styles.scrubberContainer}>
-                <FlatList
-                    ref={scrubberListRef}
-                    data={photos}
-                    renderItem={renderThumbnail}
-                    keyExtractor={item => item.id}
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={{
-                        paddingHorizontal: centerPadding,
-                        alignItems: 'center'
-                    }}
-                    getItemLayout={(data, index) => (
-                        { length: ITEM_WIDTH, offset: ITEM_WIDTH * index, index }
-                    )}
-                />
-            </View>
+            {showControls && (
+                <View style={[styles.scrubberContainer, { bottom: 90 + insets.bottom }]}>
+                    <FlatList
+                        ref={scrubberListRef}
+                        data={photos}
+                        renderItem={renderThumbnail}
+                        keyExtractor={item => item.id}
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={{
+                            paddingHorizontal: centerPadding,
+                            alignItems: 'center'
+                        }}
+                        getItemLayout={(data, index) => (
+                            { length: ITEM_WIDTH, offset: ITEM_WIDTH * index, index }
+                        )}
+                    />
+                </View>
+            )}
 
             {/* Bottom Toolbar */}
-            <BlurView intensity={80} tint="dark" style={[styles.toolbar, { paddingBottom: insets.bottom }]}>
-                <Pressable style={styles.toolbarButton}><Share size={24} color="#0A84FF" /></Pressable>
-                <Pressable style={styles.toolbarButton}><Heart size={24} color="#0A84FF" /></Pressable>
-                <Pressable style={styles.toolbarButton}><Info size={24} color="#0A84FF" /></Pressable>
-                <Pressable style={styles.toolbarButton}><Sliders size={24} color="#0A84FF" /></Pressable>
-                <Pressable style={styles.toolbarButton} onPress={handleDelete}><Trash size={24} color="#0A84FF" /></Pressable>
-            </BlurView>
+            {showControls && (
+                <BlurView intensity={80} tint="dark" style={[styles.toolbar, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+                    <Pressable style={styles.toolbarButton} onPress={handleShare}><Share size={24} color="#0A84FF" /></Pressable>
+                    <Pressable style={styles.toolbarButton} onPress={handleFavorite}>
+                        <Heart size={24} color={currentPhoto?.isFavorite ? "#FF3B30" : "#0A84FF"} fill={currentPhoto?.isFavorite ? "#FF3B30" : "transparent"} />
+                    </Pressable>
+                    <Pressable style={styles.toolbarButton} onPress={() => setShowInfo(true)}><Info size={24} color="#0A84FF" /></Pressable>
+                    <Pressable style={styles.toolbarButton}><Sliders size={24} color="#0A84FF" /></Pressable>
+                    <Pressable style={styles.toolbarButton} onPress={handleDelete}><Trash size={24} color="#0A84FF" /></Pressable>
+                </BlurView>
+            )}
+
+            {/* Info Metadata Sheet */}
+            <Modal
+                animationType="slide"
+                transparent={true}
+                visible={showInfo}
+                onRequestClose={() => setShowInfo(false)}
+            >
+                <Pressable style={styles.modalOverlay} onPress={() => setShowInfo(false)}>
+                    <BlurView intensity={80} tint="dark" style={[styles.infoSheet, { paddingBottom: insets.bottom + 20 }]}>
+                        <View style={styles.handle} />
+                        <Text style={styles.infoTitle}>Info</Text>
+
+                        <View style={styles.infoRow}>
+                            <Text style={styles.infoLabel}>Filename</Text>
+                            <Text style={styles.infoValue} numberOfLines={1}>{currentPhoto?.name}</Text>
+                        </View>
+                        <View style={styles.infoRow}>
+                            <Text style={styles.infoLabel}>Date</Text>
+                            <Text style={styles.infoValue}>{displayDate} {displayTime}</Text>
+                        </View>
+                        <View style={styles.infoRow}>
+                            <Text style={styles.infoLabel}>Size</Text>
+                            <Text style={styles.infoValue}>{currentPhoto?.size}</Text>
+                        </View>
+                        <View style={styles.infoRow}>
+                            <Text style={styles.infoLabel}>Type</Text>
+                            <Text style={styles.infoValue}>{currentPhoto?.type.toUpperCase()}</Text>
+                        </View>
+
+                        <TouchableOpacity style={styles.closeButton} onPress={() => setShowInfo(false)}>
+                            <Text style={styles.closeButtonText}>Close</Text>
+                        </TouchableOpacity>
+                    </BlurView>
+                </Pressable>
+            </Modal>
         </View>
     );
 }
@@ -290,4 +432,57 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         padding: 10,
     },
+    modalOverlay: {
+        flex: 1,
+        justifyContent: 'flex-end',
+    },
+    infoSheet: {
+        backgroundColor: '#1C1C1E',
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 20,
+        padding: 20,
+        overflow: 'hidden',
+    },
+    handle: {
+        width: 40,
+        height: 4,
+        backgroundColor: '#3A3A3C',
+        borderRadius: 2,
+        alignSelf: 'center',
+        marginBottom: 15,
+    },
+    infoTitle: {
+        color: '#fff',
+        fontSize: 20,
+        fontWeight: '700',
+        marginBottom: 20,
+    },
+    infoRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        paddingVertical: 12,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: '#38383A',
+    },
+    infoLabel: {
+        color: '#8E8E93',
+        fontSize: 16,
+    },
+    infoValue: {
+        color: '#fff',
+        fontSize: 16,
+        maxWidth: '70%',
+    },
+    closeButton: {
+        marginTop: 20,
+        backgroundColor: '#3A3A3C',
+        paddingVertical: 12,
+        borderRadius: 12,
+        alignItems: 'center',
+    },
+    closeButtonText: {
+        color: '#fff',
+        fontSize: 16,
+        fontWeight: '600',
+    }
 });
